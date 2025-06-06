@@ -4,7 +4,7 @@ import mysql.connector
 import os
 from dotenv import load_dotenv
 from flask import Flask
-import threading
+from threading import Thread
 
 load_dotenv()
 
@@ -77,18 +77,24 @@ async def superadmin(ctx, action: str, member: discord.Member):
     except Exception as e:
         await ctx.send(f"⚠️ Error updating database: {e}")
 
-# Minimal Flask web server for Render port binding
-app = Flask("")
+# ---------- Keep-Alive Server for Render + UptimeRobot ----------
 
-@app.route("/")
+app = Flask('')
+
+@app.route('/')
 def home():
-    return "Bot is running!"
+    return "✅ Bot is alive and running!"
 
-def run_flask():
+def run():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host='0.0.0.0', port=port)
 
-flask_thread = threading.Thread(target=run_flask)
-flask_thread.start()
+def keep_alive():
+    thread = Thread(target=run)
+    thread.start()
 
+# Start the Flask server before starting the bot
+keep_alive()
+
+# Start the bot
 bot.run(BOT_TOKEN)
