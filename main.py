@@ -10,7 +10,7 @@ DB_PASS = "NzMfXaj6B7AqrhqV"
 DB_NAME = "pristine_tundra"
 
 # Your Discord bot token
-BOT_TOKEN = ""
+BOT_TOKEN = "MTM4MDY0NDY4MTYwNzgwNzAxNw.G-kZWh.9ZZYwff08pfNYelkoiJfEw7_vw-GbSLOhP3GwQ"
 
 REQUIRED_ROLE_ID = 1352273949349908491  # The role ID allowed to run the command
 
