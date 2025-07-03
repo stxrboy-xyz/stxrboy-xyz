@@ -8,11 +8,11 @@ from threading import Thread
 
 load_dotenv()
 
-DB_HOST = "ovh-bom.opfw.me"
+DB_HOST = "ctb-bom.opfw.me"
 DB_PORT = 3306
-DB_USER = "pristine_tundra"
-DB_PASS = "NzMfXaj6B7AqrhqV"
-DB_NAME = "pristine_tundra"
+DB_USER = "pearly_highland"
+DB_PASS = "42M8XPBA61xEwx2l"
+DB_NAME = "pearly_highland"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 REQUIRED_ROLE_ID = 1352273949349908491
@@ -83,7 +83,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "✅ Bot is alive and running!"
+    return "✅ Bot is alive and running!, updated"
 
 def run():
     port = int(os.environ.get("PORT", 8080))
