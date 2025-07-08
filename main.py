@@ -1,16 +1,13 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import mysql.connector
 import os
 from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
-import time
-import asyncio
 
 load_dotenv()
 
-# ---------- DATABASE CONFIGS ----------
 # Primary DB
 DB1 = {
     "host": "ctb-bom.opfw.me",
@@ -20,7 +17,7 @@ DB1 = {
     "database": "pearly_highland"
 }
 
-# Secondary DB (to be synced)
+# Secondary DB (new one you added)
 DB2 = {
     "host": "ctb-bom.opfw.me",
     "port": 3306,
@@ -32,7 +29,6 @@ DB2 = {
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 REQUIRED_ROLE_ID = 1352273949349908491
 
-# ---------- DISCORD BOT SETUP ----------
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -52,7 +48,6 @@ def get_db_connection(db_config):
 @bot.event
 async def on_ready():
     print(f"✅ Bot logged in as {bot.user}")
-    sync_db_loop.start()  # Start the background sync loop
 
 @bot.command()
 async def superadmin(ctx, action: str, member: discord.Member):
@@ -69,85 +64,52 @@ async def superadmin(ctx, action: str, member: discord.Member):
     discord_id = str(member.id)
     new_value = 1 if action == "add" else 0
 
-    try:
-        conn = get_db_connection(DB1)
-        cursor = conn.cursor()
-        cursor.execute("SELECT is_super_admin FROM users WHERE discord_id = %s", (discord_id,))
-        result = cursor.fetchone()
+    async def update_db(db_config):
+        try:
+            conn = get_db_connection(db_config)
+            cursor = conn.cursor()
+            cursor.execute("SELECT is_super_admin FROM users WHERE discord_id = %s", (discord_id,))
+            result = cursor.fetchone()
 
-        if result is None:
-            await ctx.send(f"⚠️ No user found with Discord ID {discord_id}.")
-        else:
-            current_value = result[0]
-            if current_value == new_value:
-                state = "already a Super Admin" if new_value == 1 else "already not a Super Admin"
-                await ctx.send(f"{member.display_name} is {state}.")
+            if result is None:
+                return f"⚠️ No user found with Discord ID {discord_id} in `{db_config['database']}`."
             else:
+                current_value = result[0]
+                if current_value == new_value:
+                    return None  # Already set
                 cursor.execute("UPDATE users SET is_super_admin = %s WHERE discord_id = %s", (new_value, discord_id))
                 conn.commit()
-                action_word = "added as" if new_value == 1 else "removed from"
-                await ctx.send(f"✅ {member.display_name} has been {action_word} Super Admins.")
+                return None  # Success
 
-        cursor.close()
-        conn.close()
+        except Exception as e:
+            return f"❌ Error in `{db_config['database']}`: {e}"
 
-    except Exception as e:
-        await ctx.send(f"⚠️ Error updating database: {e}")
-
-# ---------- DATABASE SYNC ----------
-def sync_table(table_name, cursor1, cursor2, conn2):
-    cursor1.execute(f"SELECT * FROM {table_name}")
-    rows = cursor1.fetchall()
-
-    cursor1.execute(f"SHOW COLUMNS FROM {table_name}")
-    columns = [col[0] for col in cursor1.fetchall()]
-    columns_str = ", ".join(columns)
-    placeholders = ", ".join(["%s"] * len(columns))
-
-    cursor2.execute(f"DELETE FROM {table_name}")
-    if rows:
-        insert_query = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders})"
-        cursor2.executemany(insert_query, rows)
-        conn2.commit()
-
-    print(f"[{time.ctime()}] ✅ Synced {table_name}: {len(rows)} rows")
-
-def sync_databases():
-    try:
-        conn1 = get_db_connection(DB1)
-        conn2 = get_db_connection(DB2)
-
-        cursor1 = conn1.cursor()
-        cursor2 = conn2.cursor()
-
-        cursor1.execute("SHOW TABLES")
-        tables = [table[0] for table in cursor1.fetchall()]
-
-        for table in tables:
+        finally:
             try:
-                sync_table(table, cursor1, cursor2, conn2)
-            except Exception as e:
-                print(f"[{time.ctime()}] ❌ Failed to sync table {table}: {e}")
+                cursor.close()
+                conn.close()
+            except:
+                pass
 
-        cursor1.close()
-        cursor2.close()
-        conn1.close()
-        conn2.close()
+    # Run both updates
+    db1_error = await update_db(DB1)
+    db2_error = await update_db(DB2)
 
-    except Exception as e:
-        print(f"[{time.ctime()}] ❌ DB Sync Error: {e}")
+    if db1_error and db2_error:
+        await ctx.send(f"Both updates failed:\n{db1_error}\n{db2_error}")
+    elif db1_error or db2_error:
+        await ctx.send(f"✅ {member.display_name} updated in one DB, but error in the other:\n{db1_error or db2_error}")
+    else:
+        action_word = "added as" if new_value == 1 else "removed from"
+        await ctx.send(f"✅ {member.display_name} has been {action_word} Super Admins in both databases.")
 
-@tasks.loop(minutes=2)
-async def sync_db_loop():
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, sync_databases)
+# ---------- Keep-Alive Server ----------
 
-# ---------- KEEP-ALIVE SERVER ----------
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "✅ Bot is alive and syncing every 2 minutes."
+    return "✅ Bot is alive and running!, updated"
 
 def run():
     port = int(os.environ.get("PORT", 8080))
