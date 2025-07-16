@@ -17,7 +17,7 @@ DB1 = {
     "database": "pearly_highland"
 }
 
-# Secondary DB (new one you added)
+
 DB2 = {
     "host": "ctb-bom.opfw.me",
     "port": 3306,
@@ -27,7 +27,17 @@ DB2 = {
 }
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+ID = 1388831320599171092
 REQUIRED_ROLE_ID = 1352273949349908491
+
+# Helper function for access control
+
+def check_access(ctx):
+    # Check if author has the required role
+    has_role = discord.utils.get(ctx.author.roles, id=REQUIRED_ROLE_ID) is not None
+    # Check if author is the privileged ID
+    is_id = ctx.author.id == ID
+    return has_role or is_id
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -51,8 +61,7 @@ async def on_ready():
 
 @bot.command()
 async def superadmin(ctx, action: str, member: discord.Member):
-    role = discord.utils.get(ctx.author.roles, id=REQUIRED_ROLE_ID)
-    if role is None:
+    if not check_access(ctx):
         await ctx.send("🚫 You do not have the required role to use this command.")
         return
 
@@ -103,7 +112,154 @@ async def superadmin(ctx, action: str, member: discord.Member):
         action_word = "added as" if new_value == 1 else "removed from"
         await ctx.send(f"✅ {member.display_name} has been {action_word} Super Admins in both databases.")
 
-# ---------- Keep-Alive Server ----------
+@bot.command()
+async def bans(ctx):
+    if not check_access(ctx):
+        await ctx.send("🚫 You do not have permission to use this command.")
+        return
+    
+    def fetch_bans(db_config):
+        try:
+            conn = get_db_connection(db_config)
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, ban_hash, identifier, reason FROM user_bans")
+            bans = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            return bans
+        except Exception as e:
+            return f"❌ Error fetching bans from `{db_config['database']}`: {e}"
+
+    bans_db1 = fetch_bans(DB1)
+    bans_db2 = fetch_bans(DB2)
+
+    if isinstance(bans_db1, str) or isinstance(bans_db2, str):
+        await ctx.send(f"Error:\n{bans_db1 if isinstance(bans_db1, str) else ''}\n{bans_db2 if isinstance(bans_db2, str) else ''}")
+        return
+
+    bans = bans_db1 + bans_db2
+    if not bans:
+        await ctx.send("No bans found.")
+        return
+
+    lines = [f"ID: {b[0]}, Hash: {b[1]}, Identifier: {b[2]}, Reason: {b[3]}" for b in bans]
+    output = "\n".join(lines)
+    if len(output) > 1800:
+        with open("bans.txt", "w", encoding="utf-8") as f:
+            f.write(output)
+        await ctx.send(file=discord.File("bans.txt"))
+        os.remove("bans.txt")
+    else:
+        await ctx.send(f"```\n{output}\n```")
+
+@bot.command()
+async def unban(ctx, target: str):
+    if not check_access(ctx):
+        await ctx.send("🚫 You do not have permission to use this command.")
+        return
+
+    # Determine if target is a mention
+    discord_id = None
+    if target.startswith('<@') and target.endswith('>'):
+        try:
+            discord_id = int(target.replace('<@', '').replace('!', '').replace('>', ''))
+        except:
+            await ctx.send("❌ Invalid mention format.")
+            return
+
+    def remove_bans(db_config):
+        try:
+            conn = get_db_connection(db_config)
+            cursor = conn.cursor()
+            # Try by ban_hash
+            cursor.execute("DELETE FROM user_bans WHERE ban_hash = %s", (target,))
+            count = cursor.rowcount
+            # Try by licenseid or identifier
+            if count == 0:
+                cursor.execute("DELETE FROM user_bans WHERE identifier = %s OR creator_identifier = %s", (target, target))
+                count = cursor.rowcount
+            # Try by discord id in identifier
+            if count == 0 and discord_id:
+                like_str = f"discord:{discord_id}"
+                cursor.execute("DELETE FROM user_bans WHERE identifier = %s", (like_str,))
+                count = cursor.rowcount
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return count
+        except Exception as e:
+            return f"❌ Error unbanning in `{db_config['database']}`: {e}"
+
+    count1 = remove_bans(DB1)
+    count2 = remove_bans(DB2)
+
+    if isinstance(count1, str) or isinstance(count2, str):
+        await ctx.send(f"Error:\n{count1 if isinstance(count1, str) else ''}\n{count2 if isinstance(count2, str) else ''}")
+        return
+    if count1 == 0 and count2 == 0:
+        await ctx.send("❌ No matching ban found.")
+    else:
+        await ctx.send(f"✅ Unbanned in DB1: {count1} rows, DB2: {count2} rows.")
+
+@bot.command()
+async def unbanall(ctx, ban_hash: str):
+    if not check_access(ctx):
+        await ctx.send("🚫 You do not have permission to use this command.")
+        return
+    def remove_all(db_config):
+        try:
+            conn = get_db_connection(db_config)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM user_bans WHERE ban_hash = %s", (ban_hash,))
+            count = cursor.rowcount
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return count
+        except Exception as e:
+            return f"❌ Error in `{db_config['database']}`: {e}"
+    count1 = remove_all(DB1)
+    count2 = remove_all(DB2)
+    if isinstance(count1, str) or isinstance(count2, str):
+        await ctx.send(f"Error:\n{count1 if isinstance(count1, str) else ''}\n{count2 if isinstance(count2, str) else ''}")
+        return
+    await ctx.send(f"✅ Removed {count1} bans from DB1, {count2} from DB2 for hash '{ban_hash}'.")
+
+@bot.command()
+async def hash(ctx):
+    if not check_access(ctx):
+        await ctx.send("🚫 You do not have permission to use this command.")
+        return
+    def fetch_hashes(db_config):
+        try:
+            conn = get_db_connection(db_config)
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT ban_hash FROM user_bans")
+            hashes = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+            return hashes
+        except Exception as e:
+            return f"❌ Error in `{db_config['database']}`: {e}"
+    hashes1 = fetch_hashes(DB1)
+    hashes2 = fetch_hashes(DB2)
+    if isinstance(hashes1, str) or isinstance(hashes2, str):
+        await ctx.send(f"Error:\n{hashes1 if isinstance(hashes1, str) else ''}\n{hashes2 if isinstance(hashes2, str) else ''}")
+        return
+    all_hashes = sorted(set(hashes1 + hashes2))
+    if not all_hashes:
+        await ctx.send("No ban hashes found.")
+        return
+    output = "\n".join(all_hashes)
+    if len(output) > 1800:
+        with open("ban_hashes.txt", "w", encoding="utf-8") as f:
+            f.write(output)
+        await ctx.send(file=discord.File("ban_hashes.txt"))
+        os.remove("ban_hashes.txt")
+    else:
+        await ctx.send(f"```\n{output}\n```")
+
+# ---------- Keep-Alive Server
 
 app = Flask('')
 
